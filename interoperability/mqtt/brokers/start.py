@@ -23,11 +23,12 @@ import sys, traceback, logging, getopt, threading, ssl
 from .V311 import MQTTBrokers as MQTTV3Brokers
 from .V5 import MQTTBrokers as MQTTV5Brokers
 from .SN import MQTTSNBrokers
+from .DTN import MQTTDTNBrokers
 from .coverage import filter, measure
 from mqtt.formats.MQTTV311 import MQTTException as MQTTV3Exception
 from mqtt.formats.MQTTV5 import MQTTException as MQTTV5Exception
 from mqtt.formats.MQTTSN import MQTTSNException
-from mqtt.brokers.listeners import TCPListeners, UDPListeners, HTTPListeners
+from mqtt.brokers.listeners import TCPListeners, UDPListeners, HTTPListeners, DTNListeners
 from mqtt.brokers.bridges import TCPBridges
 
 logger = None
@@ -80,7 +81,7 @@ def process_config(config):
         if len(words) >= 3:
           bind_address = words[2]
         if len(words) >= 4:
-          if words[3] in ["mqttsn", "http"]:
+          if words[3] in ["mqttsn", "http", "dtn"]:
             protocol = words[3]
         while lineno < len(config) and not (config[lineno].strip().startswith("listener") or
                                             config[lineno].strip().startswith("connection") ):
@@ -106,6 +107,8 @@ def process_config(config):
         elif protocol == "http":
           servers_to_create.append((HTTPListeners, {"host":bind_address, "port":port, "TLS":TLS, "cert_reqs":cert_reqs,
               "ca_certs":ca_certs, "certfile":certfile, "keyfile":keyfile}))
+        elif protocol == "dtn":
+          servers_to_create.append((DTNListeners, {"pipe":bind_address}))
       elif words[0] == "connection":
         # Bridge connection, pull out address, protocol and topic lines.
         bridgename="local"
@@ -178,7 +181,9 @@ def run(config=None):
 
   brokerSN = MQTTSNBrokers(lock=lock, sharedData=sharedData)
 
-  brokers = [broker3, broker5, brokerSN]
+  brokerDTN = MQTTDTNBrokers(lock=lock, sharedData=sharedData)
+  
+  brokers = [broker3, broker5, brokerSN, brokerDTN]
 
   broker3.setBroker5(broker5)
   broker5.setBroker3(broker3)
@@ -186,9 +191,13 @@ def run(config=None):
   brokerSN.setBroker3(broker3)
   brokerSN.setBroker5(broker5)
 
+  brokerDTN.setBroker3(broker3)
+  brokerDTN.setBroker5(broker5)
+
   servers = []
   bridges = []
   UDPListeners.setBroker(brokerSN)
+  DTNListeners.setBroker(brokerDTN)
   TCPListeners.setBrokers(broker3, broker5)
   HTTPListeners.setBrokers(broker3, broker5, brokerSN)
   HTTPListeners.setSharedData(lock, sharedData)
@@ -248,6 +257,7 @@ def reinitialize():
   broker3.reinitialize()
   broker5.reinitialize()
   brokerSN.reinitialize()
+  brokerDTN.reinitialize()
 
 def read_config(filename):
   infile = open(filename)
