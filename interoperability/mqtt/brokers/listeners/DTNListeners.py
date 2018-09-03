@@ -19,7 +19,7 @@
 
 import socketserver, select, sys, traceback, socket, logging, getopt, hashlib, base64, json
 import threading, ssl
-import os, sys
+import os, sys, subprocess
 
 from mqtt.brokers.DTN import MQTTDTNBrokers
 from mqtt.formats.MQTTSN import MQTTSNException
@@ -27,22 +27,27 @@ from mqtt.formats.MQTTSN import MQTTSNException
 logger = logging.getLogger('MQTT broker')
 
 def respond(handler, data):
-  #to-do!
-  pass
-#  socket = handler.request[1]
-#  socket.sendto(data, handler.client_address)
+  endpoint = handler.source
+  send = subprocess.call(["dtnsend","--src","mqtt",endpoint],stdin=PIPE)
+  send.stdin.communicate(input=data)
+  send.stdin.close()
 
 class DTNHandler():
   """
   This will take care of the messages that we receive and put them to the right data.
   """
 
-  def handle(self, line):
-    logger.info("received: %s"%line)
-    message = json.loads(line)
-    packet = base64.b64decode(message['payload'])
-    # should pass down message.timestamp somehow...
-    terminate = brokerDTN.handleRequest(packet, message['source'], (respond, self))
+  def handle(self, lines):
+    logger.info("DTNListener: received: %s"%lines)
+    messages = lines.split('\n')
+    for line in messages:
+      if not len(line) > 2:
+        break
+      message = json.loads(line)
+      self.source = message['source']
+      packet = base64.b64decode(message['payload'])
+      # should pass down message.timestamp somehow...
+      terminate = brokerDTN.handleRequest(packet, self.source, (respond, self))
 
 
 class ThreadingDTNServer:
@@ -55,20 +60,20 @@ class ThreadingDTNServer:
     self.handler = handlerinstance
     
   def read_forever(self):
-    logger.debug("Starting read")
+    logger.debug("DTNListener: Starting read")
     while True:
-      logger.debug("opening pipe")
+      logger.debug("DTNListener: opening pipe")
       with open(self.pipe) as pipe_data:
-        logger.debug("opened pipe")
+        logger.debug("DTNListener: opened pipe")
         while True:
-          logger.debug("reading from pipe")
+          logger.debug("DTNListener: reading from pipe")
           select.select([pipe_data],[],[pipe_data])
           line = pipe_data.read()
           if len(line) == 0:
-            logger.debug("FIFO closed")
+            logger.debug("DTNListener: FIFO closed")
             break
           self.handler.handle(line)
-    logger.debug("done")
+    logger.debug("DTNListener: done")
 
   def shutdown(_):
     pass
@@ -79,7 +84,7 @@ def setBroker(aBrokerDTN):
   brokerDTN = aBrokerDTN
 
 def create(pipe="", serve_forever=False):
-  logger.info("Starting DTN listener on pipe '%s'", pipe)
+  logger.info("DTNListener: Starting DTN listener on pipe '%s'", pipe)
   server = ThreadingDTNServer(pipe, DTNHandler())
   thread = threading.Thread(target = server.read_forever)
   thread.daemon = True
